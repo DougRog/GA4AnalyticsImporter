@@ -126,11 +126,36 @@ function validatePropertyIds() {
     throw new Error('PROPERTY_IDS array is empty. Please add at least one property ID.');
   }
 
+  Logger.log(`Validating ${PROPERTY_IDS.length} property ID(s)...`);
+
   PROPERTY_IDS.forEach((id, index) => {
-    if (typeof id !== 'string' || id.trim() === '') {
-      throw new Error(`Invalid property ID at index ${index}: ${id}`);
+    // Log each property ID for debugging
+    Logger.log(`  [${index}] Type: ${typeof id}, Value: "${id}"`);
+
+    // Check for undefined, null, or non-string values
+    if (id === undefined) {
+      throw new Error(`Property ID at index ${index} is undefined. Check for trailing commas or empty elements in PROPERTY_IDS array.`);
+    }
+
+    if (id === null) {
+      throw new Error(`Property ID at index ${index} is null.`);
+    }
+
+    if (typeof id !== 'string') {
+      throw new Error(`Property ID at index ${index} must be a string, got ${typeof id}: ${id}`);
+    }
+
+    if (id.trim() === '') {
+      throw new Error(`Property ID at index ${index} is an empty string.`);
+    }
+
+    // Validate it looks like a property ID (should be numeric)
+    if (!/^\d+$/.test(id.trim())) {
+      Logger.log(`  ⚠️  Warning: Property ID at index ${index} ("${id}") doesn't look like a numeric ID`);
     }
   });
+
+  Logger.log(`✓ All ${PROPERTY_IDS.length} property ID(s) validated successfully`);
 }
 
 /**
