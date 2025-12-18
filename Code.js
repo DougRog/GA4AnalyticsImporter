@@ -84,6 +84,20 @@ const METRICS_CONFIG = [
  * @return {string} The property display name or property ID if unavailable
  */
 function getPropertyName(propertyId) {
+  // Explicit check at the start of this function
+  if (propertyId === undefined || propertyId === null) {
+    const errorMsg = `CRITICAL ERROR: getPropertyName called with ${propertyId} value. This should never happen if validation passed.`;
+    Logger.log(errorMsg);
+    Logger.log(`PROPERTY_IDS array contains: ${JSON.stringify(PROPERTY_IDS)}`);
+    throw new Error(errorMsg);
+  }
+
+  if (typeof propertyId !== 'string' || propertyId.trim() === '') {
+    const errorMsg = `CRITICAL ERROR: getPropertyName called with invalid propertyId: type=${typeof propertyId}, value="${propertyId}"`;
+    Logger.log(errorMsg);
+    throw new Error(errorMsg);
+  }
+
   try {
     const property = AnalyticsAdmin.Properties.get('properties/' + propertyId);
     return property.displayName || propertyId;
