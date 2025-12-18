@@ -94,6 +94,26 @@ function getPropertyName(propertyId) {
 }
 
 /**
+ * Generate sheet name with property ID to prevent conflicts
+ * @param {string} propertyName - The property display name
+ * @param {string} propertyId - The GA4 property ID
+ * @return {string} Sheet name in format "PropertyName (ID)"
+ */
+function generateSheetName(propertyName, propertyId) {
+  // Include property ID in parentheses to prevent conflicts
+  // Google Sheets tab names have a 100 character limit
+  const sheetName = `${propertyName} (${propertyId})`;
+
+  // Truncate if too long (reserve space for property ID)
+  if (sheetName.length > 100) {
+    const maxNameLength = 100 - propertyId.length - 3; // 3 for " ()"
+    return `${propertyName.substring(0, maxNameLength)} (${propertyId})`;
+  }
+
+  return sheetName;
+}
+
+/**
  * Validate property IDs array
  * @throws {Error} If PROPERTY_IDS is invalid
  */
@@ -137,7 +157,8 @@ function updateAllProperties() {
   PROPERTY_IDS.forEach(propertyId => {
     try {
       const propertyName = getPropertyName(propertyId);
-      updatePropertyData(spreadsheet, propertyId, propertyName);
+      const sheetName = generateSheetName(propertyName, propertyId);
+      updatePropertyData(spreadsheet, propertyId, propertyName, sheetName);
       successCount++;
     } catch (error) {
       Logger.log(`✗ Error updating ${propertyId}: ${error.message}`);
@@ -158,21 +179,22 @@ function updateAllProperties() {
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} spreadsheet - The active spreadsheet
  * @param {string} propertyId - The GA4 property ID
  * @param {string} propertyName - The display name for the property
+ * @param {string} sheetName - The sheet name (includes property ID to prevent conflicts)
  */
-function updatePropertyData(spreadsheet, propertyId, propertyName) {
+function updatePropertyData(spreadsheet, propertyId, propertyName, sheetName) {
   Logger.log(`\n${'='.repeat(40)}`);
   Logger.log(`Processing: ${propertyName} (${propertyId})`);
   Logger.log(`${'='.repeat(40)}`);
 
-  let sheet = spreadsheet.getSheetByName(propertyName);
+  let sheet = spreadsheet.getSheetByName(sheetName);
 
   // Create sheet if it doesn't exist
   if (!sheet) {
-    Logger.log(`Creating new sheet: ${propertyName}`);
-    sheet = spreadsheet.insertSheet(propertyName);
+    Logger.log(`Creating new sheet: ${sheetName}`);
+    sheet = spreadsheet.insertSheet(sheetName);
     initializeSheet(sheet);
   } else {
-    Logger.log(`Sheet "${propertyName}" already exists`);
+    Logger.log(`Sheet "${sheetName}" already exists`);
   }
 
   // Get all complete months for this property
@@ -256,13 +278,20 @@ function formatMonthLabel(monthString) {
 
 /**
  * Get all complete months from GA4 property creation to last complete month
+ * ONLY returns complete months - excludes the current partial month
  * @param {string} propertyId - The GA4 property ID
- * @return {string[]} Array of month strings in YYYY-MM format
+ * @return {string[]} Array of month strings in YYYY-MM format (only complete months)
  */
 function getAllCompleteMonths(propertyId) {
   const months = [];
   const now = new Date();
+
+  // Calculate last complete month (always previous month, never current month)
+  // This ensures we only pull months with a full month's worth of data
   const lastCompleteMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  Logger.log(`Current date: ${now.toISOString().split('T')[0]}`);
+  Logger.log(`Last complete month: ${lastCompleteMonth.getFullYear()}-${String(lastCompleteMonth.getMonth() + 1).padStart(2, '0')}`);
 
   // Try to get property creation date
   let startDate;
@@ -270,9 +299,11 @@ function getAllCompleteMonths(propertyId) {
     const property = AnalyticsAdmin.Properties.get('properties/' + propertyId);
     if (property.createTime) {
       startDate = new Date(property.createTime);
+      Logger.log(`Property created: ${property.createTime}`);
     } else {
       // Default to lookback period if creation date not available
       startDate = new Date(now.getFullYear() - DEFAULT_LOOKBACK_YEARS, now.getMonth(), 1);
+      Logger.log(`Property creation date unavailable, using ${DEFAULT_LOOKBACK_YEARS} year lookback`);
     }
   } catch (error) {
     Logger.log(`Could not fetch property creation date: ${error.message}`);
@@ -283,7 +314,7 @@ function getAllCompleteMonths(propertyId) {
   // Start from the first full month after creation
   let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 1);
 
-  // Generate all complete months up to last complete month
+  // Generate all complete months up to last complete month (excluding current month)
   while (currentMonth <= lastCompleteMonth) {
     const year = currentMonth.getFullYear();
     const month = String(currentMonth.getMonth() + 1).padStart(2, '0');
@@ -296,15 +327,17 @@ function getAllCompleteMonths(propertyId) {
 
 /**
  * Check if month data already exists in sheet
+ * Prevents duplicate imports by checking existing column headers
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - The sheet to check
- * @param {string} monthString - Month in YYYY-MM format
- * @return {boolean} True if month data already exists
+ * @param {string} monthString - Month in YYYY-MM format (e.g., "2025-11")
+ * @return {boolean} True if month data already exists, false if it needs to be imported
  */
 function hasMonthData(sheet, monthString) {
   const lastCol = sheet.getLastColumn();
 
   // If only 1 column exists (just the metric names), no data yet
   if (lastCol < 2) {
+    Logger.log(`No data columns exist yet for ${formatMonthLabel(monthString)}`);
     return false;
   }
 
@@ -312,14 +345,18 @@ function hasMonthData(sheet, monthString) {
   const monthRow = sheet.getRange(1, 2, 1, lastCol - 1).getValues()[0];
   const formattedMonth = formatMonthLabel(monthString);
 
-  // Check if this month already exists
+  // Check if this month already exists in any column
+  // We check for both formats: "2025-11" and "November 2025" to be robust
   const exists = monthRow.some(cell => {
+    if (!cell) return false; // Skip empty cells
     const cellValue = String(cell).trim();
     return cellValue === monthString || cellValue === formattedMonth;
   });
 
   if (exists) {
-    Logger.log(`✓ Month "${formattedMonth}" already exists in sheet - skipping`);
+    Logger.log(`✓ Month "${formattedMonth}" already exists in sheet - SKIPPING to prevent duplicate`);
+  } else {
+    Logger.log(`✗ Month "${formattedMonth}" not found - will import`);
   }
 
   return exists;
