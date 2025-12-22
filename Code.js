@@ -104,7 +104,26 @@ function getPropertyCreationDate(propertyId) {
 function updateAllProperties() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
 
-  PROPERTY_IDS.forEach(propertyId => {
+  // Debug: Log the property IDs array
+  Logger.log(`Processing ${PROPERTY_IDS.length} property ID(s): ${JSON.stringify(PROPERTY_IDS)}`);
+
+  // Filter out any undefined, null, or empty values
+  const validPropertyIds = PROPERTY_IDS.filter(id => {
+    if (!id || id.trim() === '') {
+      Logger.log(`Skipping invalid property ID: ${id}`);
+      return false;
+    }
+    return true;
+  });
+
+  if (validPropertyIds.length === 0) {
+    Logger.log('ERROR: No valid property IDs found in PROPERTY_IDS array!');
+    return;
+  }
+
+  Logger.log(`Found ${validPropertyIds.length} valid property ID(s)`);
+
+  validPropertyIds.forEach(propertyId => {
     try {
       const propertyName = getPropertyName(propertyId);
       updatePropertyData(spreadsheet, propertyId, propertyName);
@@ -523,4 +542,32 @@ function clearPropertyCache() {
     `propCreate_${id}`
   ]));
   Logger.log('Property cache cleared');
+}
+
+/**
+ * Diagnostic function to check PROPERTY_IDS configuration
+ * Run this to verify your property IDs are set up correctly
+ */
+function testPropertyIdsConfiguration() {
+  Logger.log('=== PROPERTY_IDS CONFIGURATION TEST ===');
+  Logger.log(`Array length: ${PROPERTY_IDS.length}`);
+  Logger.log(`Array contents: ${JSON.stringify(PROPERTY_IDS, null, 2)}`);
+
+  PROPERTY_IDS.forEach((id, index) => {
+    Logger.log(`\nProperty ID #${index + 1}:`);
+    Logger.log(`  Value: "${id}"`);
+    Logger.log(`  Type: ${typeof id}`);
+    Logger.log(`  Is valid: ${id && typeof id === 'string' && id.trim() !== ''}`);
+  });
+
+  const validIds = PROPERTY_IDS.filter(id => id && typeof id === 'string' && id.trim() !== '');
+  Logger.log(`\nValid property IDs: ${validIds.length} out of ${PROPERTY_IDS.length}`);
+
+  if (validIds.length === 0) {
+    Logger.log('\n⚠️ ERROR: No valid property IDs found!');
+    Logger.log('Please check the PROPERTY_IDS array at the top of the script.');
+    Logger.log('Make sure you have at least one uncommented property ID like: \'309532396\'');
+  } else {
+    Logger.log('\n✓ Configuration looks good!');
+  }
 }
