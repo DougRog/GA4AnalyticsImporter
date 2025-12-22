@@ -158,6 +158,8 @@ function updatePropertyData(spreadsheet, propertyId, propertyName) {
 
   // Batch check which months already exist
   const existingMonths = getExistingMonths(sheet);
+  Logger.log(`Existing months in sheet: ${Array.from(existingMonths).join(', ')}`);
+
   const monthsToFetch = allMonths.filter(month => !existingMonths.has(month));
 
   if (monthsToFetch.length === 0) {
@@ -165,7 +167,7 @@ function updatePropertyData(spreadsheet, propertyId, propertyName) {
     return;
   }
 
-  Logger.log(`Need to fetch ${monthsToFetch.length} new month(s)`);
+  Logger.log(`Need to fetch ${monthsToFetch.length} new month(s): ${monthsToFetch.join(', ')}`);
 
   // Process each month
   let updatedCount = 0;
@@ -278,7 +280,7 @@ function getExistingMonths(sheet) {
   // Get all month headers (row 1, starting from column 2) in one read
   const monthRow = sheet.getRange(1, 2, 1, lastCol - 1).getValues()[0];
 
-  monthRow.forEach(cell => {
+  monthRow.forEach((cell, index) => {
     const cellValue = String(cell).trim();
     if (cellValue) {
       // Store both the formatted version and try to convert back to YYYY-MM
@@ -288,6 +290,9 @@ function getExistingMonths(sheet) {
       const parsed = parseMonthLabel(cellValue);
       if (parsed) {
         existingMonths.add(parsed);
+        Logger.log(`  Column ${index + 2}: "${cellValue}" → parsed to "${parsed}"`);
+      } else {
+        Logger.log(`  Column ${index + 2}: "${cellValue}" → failed to parse`);
       }
     }
   });
