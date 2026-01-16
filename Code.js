@@ -98,8 +98,31 @@ function getPropertyCreationDate(propertyId) {
 }
 
 /**
+ * Update a single property by index (0-based)
+ * Use this to avoid timeouts when processing many properties
+ * Example: updateSingleProperty(0) updates the first property
+ */
+function updateSingleProperty(index) {
+  if (index < 0 || index >= PROPERTY_IDS.length) {
+    Logger.log(`ERROR: Index ${index} is out of range. Valid range: 0-${PROPERTY_IDS.length - 1}`);
+    return;
+  }
+
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const propertyId = PROPERTY_IDS[index];
+
+  Logger.log(`Updating property ${index + 1} of ${PROPERTY_IDS.length}: ${propertyId}`);
+
+  const propertyName = getPropertyName(propertyId);
+  updatePropertyData(spreadsheet, propertyId, propertyName);
+
+  Logger.log(`✓ Completed property ${index + 1} of ${PROPERTY_IDS.length}`);
+}
+
+/**
  * Main function to update all properties
- * Run this manually or set up a trigger to run monthly
+ * WARNING: May timeout if you have many properties with lots of historical data
+ * Consider using updateSingleProperty() or updatePropertiesBatch() instead
  */
 function updateAllProperties() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -134,6 +157,30 @@ function updateAllProperties() {
 }
 
 /**
+ * Update a batch of properties to avoid timeouts
+ * Example: updatePropertiesBatch(0, 5) updates properties 0-4
+ */
+function updatePropertiesBatch(startIndex, count) {
+  const endIndex = Math.min(startIndex + count, PROPERTY_IDS.length);
+
+  Logger.log(`Updating properties ${startIndex} to ${endIndex - 1} (${endIndex - startIndex} properties)`);
+
+  for (let i = startIndex; i < endIndex; i++) {
+    try {
+      updateSingleProperty(i);
+    } catch (error) {
+      Logger.log(`Error updating property ${i}: ${error.message}`);
+    }
+  }
+
+  Logger.log(`Batch complete. Updated ${endIndex - startIndex} properties.`);
+
+  if (endIndex < PROPERTY_IDS.length) {
+    Logger.log(`To continue, run: updatePropertiesBatch(${endIndex}, ${count})`);
+  }
+}
+
+/**
  * Update data for a single property
  */
 function updatePropertyData(spreadsheet, propertyId, propertyName) {
@@ -154,16 +201,23 @@ function updatePropertyData(spreadsheet, propertyId, propertyName) {
 
   // Get all complete months for this property
   const allMonths = getAllCompleteMonths(propertyId);
-  Logger.log(`Found ${allMonths.length} complete month(s) to check`);
+  Logger.log(`Found ${allMonths.length} complete month(s) available: ${allMonths.join(', ')}`);
 
   // Batch check which months already exist
+  Logger.log(`Checking for existing months in sheet...`);
   const existingMonths = getExistingMonths(sheet);
-  Logger.log(`Existing months in sheet: ${Array.from(existingMonths).join(', ')}`);
+  Logger.log(`Existing months identifiers: ${Array.from(existingMonths).join(', ')}`);
 
-  const monthsToFetch = allMonths.filter(month => !existingMonths.has(month));
+  const monthsToFetch = allMonths.filter(month => {
+    const exists = existingMonths.has(month);
+    if (exists) {
+      Logger.log(`  ✓ Month ${month} (${formatMonthLabel(month)}) already exists - skipping`);
+    }
+    return !exists;
+  });
 
   if (monthsToFetch.length === 0) {
-    Logger.log(`All months already exist - nothing to fetch`);
+    Logger.log(`✓ All months already exist - nothing to fetch`);
     return;
   }
 
@@ -272,17 +326,32 @@ function getExistingMonths(sheet) {
   const existingMonths = new Set();
   const lastCol = sheet.getLastColumn();
 
+  Logger.log(`  Sheet has ${lastCol} column(s)`);
+
   // If only 1 column exists (just the metric names), no data yet
   if (lastCol < 2) {
+    Logger.log(`  No data columns found (only metric names column)`);
     return existingMonths;
   }
 
   // Get all month headers (row 1, starting from column 2) in one read
   const monthRow = sheet.getRange(1, 2, 1, lastCol - 1).getValues()[0];
+  Logger.log(`  Reading ${monthRow.length} month header(s) from columns 2-${lastCol}`);
 
   monthRow.forEach((cell, index) => {
-    const cellValue = String(cell).trim();
-    if (cellValue) {
+    // Handle both string and Date object values
+    let cellValue;
+    if (cell instanceof Date) {
+      // If it's a Date object, format it as "Month YYYY"
+      const monthName = cell.toLocaleString('en-US', { month: 'long' });
+      const year = cell.getFullYear();
+      cellValue = `${monthName} ${year}`;
+      Logger.log(`  Column ${index + 2}: [Date object] → converted to "${cellValue}"`);
+    } else {
+      cellValue = String(cell).trim();
+    }
+
+    if (cellValue && cellValue !== '') {
       // Store both the formatted version and try to convert back to YYYY-MM
       existingMonths.add(cellValue);
 
@@ -292,20 +361,34 @@ function getExistingMonths(sheet) {
         existingMonths.add(parsed);
         Logger.log(`  Column ${index + 2}: "${cellValue}" → parsed to "${parsed}"`);
       } else {
-        Logger.log(`  Column ${index + 2}: "${cellValue}" → failed to parse`);
+        Logger.log(`  Column ${index + 2}: "${cellValue}" → failed to parse (keeping original)`);
       }
     }
   });
 
+  Logger.log(`  Total unique month identifiers found: ${existingMonths.size}`);
   return existingMonths;
 }
 
 /**
  * Parse formatted month label back to YYYY-MM format
+ * Handles formats like "October 2025", "October  2025" (extra spaces), etc.
  */
 function parseMonthLabel(label) {
-  const match = label.match(/^(\w+)\s+(\d{4})$/);
-  if (!match) return null;
+  if (!label) return null;
+
+  // Normalize spaces and trim
+  const normalized = String(label).trim().replace(/\s+/g, ' ');
+
+  // Try to match "Month YYYY" pattern
+  const match = normalized.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (!match) {
+    // Also try YYYY-MM format (in case it's already in that format)
+    if (/^\d{4}-\d{2}$/.test(normalized)) {
+      return normalized;
+    }
+    return null;
+  }
 
   const monthName = match[1];
   const year = match[2];
